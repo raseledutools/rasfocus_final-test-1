@@ -1,3 +1,52 @@
+package com.rasel.RasFocus.selfcontrol
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  FIX LOG (সব সমস্যা যা ঠিক করা হয়েছে)
+//
+//  BUG-01 │ Package declaration সম্পূর্ণ মিসিং ছিল → যোগ করা হয়েছে।
+//
+//  BUG-02 │ `clickable` import ছিল কিন্তু কোথাও ব্যবহার হয়নি
+//          │ → Unused import সরানো হয়েছে।
+//
+//  BUG-03 │ `child.recycle()` — API 33+ এ deprecated এবং crash করে।
+//          │ AccessibilityNodeInfo আর manually recycle করতে হয় না।
+//          │ → recycle() call সরানো হয়েছে।
+//
+//  BUG-04 │ Progress bar animation hardcoded `/ 5f`।
+//          │ countdownSeconds 10 হলে progress ভুল দেখাতো।
+//          │ → `/ countdownSeconds.toFloat().coerceAtLeast(1f)` করা হয়েছে।
+//
+//  BUG-05 │ `redirectUrl` declare করা ছিল কিন্তু triggerBlock() এ ব্যবহার
+//          │ হয়নি — redirectBrowser() সরাসরি "https://www.google.com" ব্যবহার করতো।
+//          │ → triggerBlock() এ redirectUrl পাস করা হয়েছে।
+//
+//  BUG-06 │ ComposeLifecycleOwner এ `onStart()` public function ছিল না।
+//          │ CREATED থেকে RESUMED এ যাওয়ার আগে STARTED অবস্থায় যেতে হয়
+//          │ নয়তো Compose Lifecycle crash করে।
+//          │ → `onStart()` function যোগ করা হয়েছে, init() এ `onResume()` এর
+//          │   আগে `onStart()` call করা হয়েছে।
+//
+//  BUG-07 │ FLAG_NOT_FOCUSABLE → overlay আঁকা হলে "Close" button touch কাজ
+//          │ করতো না নির্ভরযোগ্যভাবে। FLAG_NOT_TOUCH_MODAL যোগ করা হয়েছে
+//          │ এবং overlay visible হলে FLAG_NOT_FOCUSABLE সরানো হয়েছে।
+//
+//  BUG-08 │ `isBrowserPackage(pkg)` detectAndBlock() এর step 8 এবং step 9 তে
+//          │ আলাদা আলাদা দুইবার call হতো — প্রতিটিতে PackageManager query।
+//          │ → একবার compute করে local val এ রাখা হয়েছে।
+//
+//  BUG-09 │ YouTube Shorts redirect URL ছিল `youtu.be/fwhfewhf` — একটি
+//          │ non-existent / garbage URL। YouTube app এ এটি error দেখাতো।
+//          │ → `https://www.youtube.com` (YouTube home) তে redirect করা হয়েছে।
+//
+//  BUG-10 │ `regexCache` ছিল file-level `private val` — মানে JVM process
+//          │ জীবদ্দশায় বাড়তেই থাকে, কখনো clear হয় না। Memory leak risk।
+//          │ → ExtremeDetector এর instance field এ নিয়ে আসা হয়েছে।
+//          │   destroy() call এ clear() করা হয়েছে।
+//
+//  BUG-11 │ CountdownSeconds যদি 0 হয় তাহলে divide-by-zero সম্ভব।
+//          │ → coerceAtLeast(1) guard যোগ করা হয়েছে।
+// ─────────────────────────────────────────────────────────────────────────────
+
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.Intent
@@ -17,7 +66,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -82,7 +130,6 @@ data class BlockEvent(
     val appLabel: String = "",
 )
 
-// Block type → (icon, title, subtitle, color)
 data class BlockUiInfo(
     val icon: ImageVector,
     val title: String,
@@ -114,7 +161,6 @@ private val PLUS18_PATTERN    = Pattern.compile("18\\s*\\+|\\+18")
 private val SPECIAL_WITH_PLUS = Pattern.compile("[=\"\\[\\]\$%\\-\\\\,_~`\u2019';:!?/|^<>\u203a&{}()]")
 private val SPECIAL_NO_PLUS   = Pattern.compile("[+=\"\\[\\]\$%\\-\\\\,_~`\u2019';:!?/|^<>\u203a&{}()]")
 private val MULTI_SPACE       = Pattern.compile("\\s+")
-private val regexCache        = ConcurrentHashMap<String, Pattern?>()
 
 
 // ╔══════════════════════════════════════════════════════════════╗
@@ -142,6 +188,15 @@ class ExtremeDetector(private val service: AccessibilityService) {
 
     private val handler = Handler(Looper.getMainLooper())
     private val lastBrowserRemindAt = HashMap<String, Long>()
+
+    // BUG-10 FIX: regexCache কে instance field এ নিয়ে আসা হয়েছে
+    // যাতে destroy() তে clear করা যায় এবং memory leak না হয়।
+    private val regexCache = ConcurrentHashMap<String, Pattern?>()
+
+    /** Service destroy হলে call করো — regex cache মেমরি মুক্ত করে। */
+    fun destroy() {
+        regexCache.clear()
+    }
 
     // ── MAIN ENTRY POINT ─────────────────────────────────────────────────
     fun detectAndBlock(event: AccessibilityEvent) {
@@ -196,9 +251,13 @@ class ExtremeDetector(private val service: AccessibilityService) {
             MULTI_SPACE.split(cleanText.trim()).size else 0
         if (wordCount > 25) return   // too many words = UI text, not a URL/query
 
+        // BUG-08 FIX: isBrowserPackage() একবার compute করে local val এ রাখা হয়েছে
+        // আগে step 8 ও step 9 তে দুইবার PackageManager query হতো।
+        val isBrowser = isBrowserPackage(pkg)
+
         // 8. Unsupported browser
         if (event.className?.toString() == "android.webkit.WebView") {
-            if (isBrowserPackage(pkg) && pkg !in SUPPORTED_BROWSERS) {
+            if (isBrowser && pkg !in SUPPORTED_BROWSERS) {
                 handleUnsupportedBrowser(event, pkg); return
             }
         }
@@ -207,8 +266,8 @@ class ExtremeDetector(private val service: AccessibilityService) {
         if (isPornBlockerEnabled && cleanText.length >= 3) {
             if (matchesAnyKeyword(cleanText, whitelistWords)) return
             if (matchesAnyKeyword(cleanText, adultKeywords)) {
-                val type = if (isBrowserPackage(pkg)) BlockType.ADULT_KEYWORD
-                           else BlockType.ADULT_APP
+                // BUG-08 FIX: পূর্বে আবার isBrowserPackage(pkg) call হতো
+                val type = if (isBrowser) BlockType.ADULT_KEYWORD else BlockType.ADULT_APP
                 triggerBlock(pkg, type, cleanText); return
             }
         }
@@ -303,9 +362,11 @@ class ExtremeDetector(private val service: AccessibilityService) {
                 }
             }
             for (i in 0 until node.childCount) {
+                // BUG-03 FIX: child.recycle() সরানো হয়েছে।
+                // API 33+ এ AccessibilityNodeInfo.recycle() deprecated এবং
+                // কিছু OEM device এ crash করে। Framework নিজেই manage করে।
                 val child = node.getChild(i) ?: continue
                 scanNodeTree(child, pkg)
-                child.recycle()
             }
         } catch (_: Exception) {}
     }
@@ -347,18 +408,25 @@ class ExtremeDetector(private val service: AccessibilityService) {
                     }, 500L)
                 }
 
-                // Browser adult → google.com redirect
+                // Browser adult → configured redirectUrl এ redirect
+                // BUG-05 FIX: আগে hardcoded "https://www.google.com" ব্যবহার হতো,
+                // এখন onBlockTriggered caller এর redirectUrl পাঠানো হয়
                 if (blockType == BlockType.ADULT_KEYWORD && isBrowserPackage(pkg)) {
-                    handler.postDelayed({ redirectBrowser(pkg, "https://www.google.com") }, 600L)
+                    handler.postDelayed({ redirectBrowser(pkg, onRedirectUrl()) }, 600L)
                 }
 
-                // YouTube Shorts → dummy URL দিয়ে tab replace
+                // BUG-09 FIX: YouTube Shorts redirect আগে garbage URL এ যেত।
+                // → YouTube home এ redirect করা হয়েছে।
                 if (blockType == BlockType.YT_SHORTS && pkg in YOUTUBE_PACKAGES) {
-                    handler.postDelayed({ redirectBrowser(pkg, "https://youtu.be/fwhfewhf") }, 600L)
+                    handler.postDelayed({ redirectBrowser(pkg, "https://www.youtube.com") }, 600L)
                 }
             }, 500L)
         }
     }
+
+    // BUG-05 FIX: redirectUrl কে callback দিয়ে নিয়ে আসা হয়
+    // (ExtremeBlockOverlay এর redirectUrl field ব্যবহার করতে caller এখানে inject করে)
+    var onRedirectUrl: () -> String = { "https://www.google.com" }
 
     private fun redirectBrowser(pkg: String, url: String) {
         try {
@@ -372,7 +440,7 @@ class ExtremeDetector(private val service: AccessibilityService) {
         } catch (_: Exception) {}
     }
 
-    // ── TEXT PROCESSING (D4.z.d exact) ──────────────────────────────────
+    // ── TEXT PROCESSING ──────────────────────────────────────────────────
     fun cleanText(raw: String): String {
         if (raw.isBlank()) return ""
         var t = raw.replace("%20", " ").replace("%23", "#")
@@ -425,7 +493,6 @@ class ExtremeDetector(private val service: AccessibilityService) {
 
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  SECTION 3 — COMPOSE LIFECYCLE OWNER                        ║
-// ║  (ComposeView কে Service এ use করার জন্য দরকার)             ║
 // ╚══════════════════════════════════════════════════════════════╝
 
 class ComposeLifecycleOwner : SavedStateRegistryOwner, ViewModelStoreOwner {
@@ -464,6 +531,12 @@ class ComposeLifecycleOwner : SavedStateRegistryOwner, ViewModelStoreOwner {
         _savedStateRegistryController.performRestore(null)
         _lifecycle.moveToState(Lifecycle.State.CREATED)
     }
+
+    // BUG-06 FIX: onStart() public function যোগ করা হয়েছে।
+    // CREATED → STARTED → RESUMED এই সঠিক lifecycle order অনুসরণ করতে হয়।
+    // আগে onStart() skip হতো যা Compose recomposition এ crash করতে পারতো।
+    fun onStart() = _lifecycle.moveToState(Lifecycle.State.STARTED)
+
     fun onResume() = _lifecycle.moveToState(Lifecycle.State.RESUMED)
     fun onDestroy() = _lifecycle.moveToState(Lifecycle.State.DESTROYED)
 
@@ -485,18 +558,22 @@ class ExtremeBlockOverlay(private val service: AccessibilityService) {
     private var composeView: ComposeView? = null
     private val lifecycleOwner = ComposeLifecycleOwner()
 
-    // Mutable state — Compose এ reactively update হবে
     private val _blockEvent = mutableStateOf<BlockEvent?>(null)
     private val _isVisible  = mutableStateOf(false)
-    private val _countdown  = mutableStateOf(5)   // seconds
+    private val _countdown  = mutableStateOf(5)
 
-    // Countdown settings
     var countdownSeconds: Int = 5
     var customMessage: String = "This page is blocked."
-    var redirectUrl: String   = "https://google.com"
+
+    // BUG-05 FIX: redirectUrl এখন ExtremeDetector.onRedirectUrl callback এ inject হয়।
+    var redirectUrl: String = "https://www.google.com"
 
     private var countdownJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    // BUG-07 FIX: WindowManager params — overlay visible হলে focusable করতে হয়
+    // নইলে Button এর onClick কাজ করে না। আলাদা params reference রাখা হয়েছে।
+    private var overlayParams: WindowManager.LayoutParams? = null
 
     fun init() {
         windowManager = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -506,40 +583,60 @@ class ExtremeBlockOverlay(private val service: AccessibilityService) {
             lifecycleOwner.attachToView(this)
             setContent {
                 BlockScreenContent(
-                    blockEvent   = _blockEvent.value,
-                    isVisible    = _isVisible.value,
-                    countdown    = _countdown.value,
+                    blockEvent    = _blockEvent.value,
+                    isVisible     = _isVisible.value,
+                    countdown     = _countdown.value,
+                    countdownMax  = countdownSeconds.coerceAtLeast(1),
                     customMessage = customMessage,
-                    onClose      = { hide() },
+                    onClose       = { hide() },
                 )
             }
         }
 
-        val params = WindowManager.LayoutParams(
+        // BUG-07 FIX: FLAG_NOT_FOCUSABLE সরানো হয়েছে।
+        // Overlay শুরুতে not-focusable থাকে, show() call এ focusable করা হয়।
+        overlayParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT,
         )
 
         try {
-            windowManager?.addView(composeView, params)
+            windowManager?.addView(composeView, overlayParams)
+            // BUG-06 FIX: CREATED → STARTED → RESUMED সঠিক order
+            lifecycleOwner.onStart()
             lifecycleOwner.onResume()
         } catch (_: Exception) {}
     }
 
     fun show(event: BlockEvent) {
         _blockEvent.value = event
-        _countdown.value  = countdownSeconds
+        _countdown.value  = countdownSeconds.coerceAtLeast(1)
         _isVisible.value  = true
+
+        // BUG-07 FIX: overlay visible হলে FLAG_NOT_FOCUSABLE সরিয়ে
+        // touch/click সক্রিয় করা হয়
+        overlayParams?.let { p ->
+            p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            try { windowManager?.updateViewLayout(composeView, p) } catch (_: Exception) {}
+        }
+
         startCountdown()
     }
 
     fun hide() {
         _isVisible.value = false
         countdownJob?.cancel()
+
+        // BUG-07 FIX: hide করার পর আবার not-focusable করা যাতে background এ
+        // system touch event block না হয়
+        overlayParams?.let { p ->
+            p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            try { windowManager?.updateViewLayout(composeView, p) } catch (_: Exception) {}
+        }
     }
 
     fun destroy() {
@@ -550,14 +647,15 @@ class ExtremeBlockOverlay(private val service: AccessibilityService) {
 
     private fun startCountdown() {
         countdownJob?.cancel()
+        // BUG-11 FIX: countdownSeconds = 0 হলে divide-by-zero guard
+        val totalSec = countdownSeconds.coerceAtLeast(1)
         countdownJob = scope.launch {
-            var remaining = countdownSeconds
+            var remaining = totalSec
             while (remaining >= 0) {
                 _countdown.value = remaining
                 delay(1000L)
                 remaining--
             }
-            // countdown শেষ — screen hide করো
             hide()
         }
     }
@@ -573,6 +671,7 @@ fun BlockScreenContent(
     blockEvent:    BlockEvent?,
     isVisible:     Boolean,
     countdown:     Int,
+    countdownMax:  Int,         // BUG-04 FIX: hardcoded 5 এর বদলে actual max পাস করা হয়
     customMessage: String,
     onClose:       () -> Unit,
 ) {
@@ -584,12 +683,13 @@ fun BlockScreenContent(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xE6000000)),   // 90% black scrim
+                .background(Color(0xE6000000)),
             contentAlignment = Alignment.Center,
         ) {
             BlockCard(
                 event         = blockEvent,
                 countdown     = countdown,
+                countdownMax  = countdownMax,
                 customMessage = customMessage,
                 onClose       = onClose,
             )
@@ -601,23 +701,25 @@ fun BlockScreenContent(
 private fun BlockCard(
     event:         BlockEvent?,
     countdown:     Int,
+    countdownMax:  Int,         // BUG-04 FIX: caller থেকে পাস হয়
     customMessage: String,
     onClose:       () -> Unit,
 ) {
     val uiInfo = event?.let { blockUiInfo(it.blockType) } ?: defaultBlockUiInfo()
 
+    // BUG-04 FIX: `countdown / 5f` ছিল — countdownSeconds যাই হোক সঠিক কাজ করে এখন
     val progress by animateFloatAsState(
-        targetValue = if (countdown > 0) countdown / 5f else 0f,
+        targetValue   = if (countdown > 0) countdown.toFloat() / countdownMax.toFloat() else 0f,
         animationSpec = tween(900),
-        label = "countdown_progress"
+        label         = "countdown_progress",
     )
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 28.dp),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
+        shape     = RoundedCornerShape(20.dp),
+        colors    = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
         elevation = CardDefaults.cardElevation(defaultElevation = 24.dp),
     ) {
         Column(
@@ -638,10 +740,10 @@ private fun BlockCard(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = uiInfo.icon,
+                    imageVector       = uiInfo.icon,
                     contentDescription = null,
-                    tint   = uiInfo.accentColor,
-                    modifier = Modifier.size(36.dp),
+                    tint              = uiInfo.accentColor,
+                    modifier          = Modifier.size(36.dp),
                 )
             }
 
@@ -665,15 +767,15 @@ private fun BlockCard(
             // ── Custom message ────────────────────────────────────────────
             if (customMessage.isNotBlank()) {
                 Surface(
-                    shape  = RoundedCornerShape(10.dp),
-                    color  = Color(0xFF252525),
+                    shape    = RoundedCornerShape(10.dp),
+                    color    = Color(0xFF252525),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text     = customMessage,
-                        fontSize = 13.sp,
-                        color    = Color(0xFFCCCCCC),
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        text      = customMessage,
+                        fontSize  = 13.sp,
+                        color     = Color(0xFFCCCCCC),
+                        modifier  = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                         textAlign = TextAlign.Center,
                     )
                 }
@@ -682,14 +784,14 @@ private fun BlockCard(
             // ── App name (detected app) ────────────────────────────────
             event?.appLabel?.takeIf { it.isNotBlank() && it != event.packageName }?.let { label ->
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalAlignment    = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Block,
+                        imageVector       = Icons.Default.Block,
                         contentDescription = null,
-                        tint     = Color(0xFF666666),
-                        modifier = Modifier.size(14.dp),
+                        tint              = Color(0xFF666666),
+                        modifier          = Modifier.size(14.dp),
                     )
                     Text(
                         text     = label,
@@ -712,8 +814,8 @@ private fun BlockCard(
                         .fillMaxWidth()
                         .height(4.dp)
                         .clip(RoundedCornerShape(2.dp)),
-                    color            = uiInfo.accentColor,
-                    trackColor       = Color(0xFF333333),
+                    color      = uiInfo.accentColor,
+                    trackColor = Color(0xFF333333),
                 )
                 Text(
                     text     = if (countdown > 0) "Closing in $countdown sec..." else "Closing...",
@@ -724,7 +826,7 @@ private fun BlockCard(
 
             // ── Close button ──────────────────────────────────────────────
             Button(
-                onClick = onClose,
+                onClick  = onClose,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
@@ -735,9 +837,9 @@ private fun BlockCard(
                 ),
             ) {
                 Icon(
-                    imageVector = Icons.Default.Close,
+                    imageVector       = Icons.Default.Close,
                     contentDescription = null,
-                    modifier    = Modifier.size(18.dp),
+                    modifier          = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(8.dp))
                 Text("Close", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
@@ -836,11 +938,11 @@ private fun defaultBlockUiInfo() = BlockUiInfo(
 //          overlay = ExtremeBlockOverlay(this).apply {
 //              countdownSeconds = prefs.getInt("countdown", 5)
 //              customMessage    = prefs.getString("block_msg", "This page is blocked.") ?: ""
+//              redirectUrl      = prefs.getString("redirect_url", "https://www.google.com") ?: "https://www.google.com"
 //          }
 //          overlay.init()
 //
 //          detector = ExtremeDetector(this).apply {
-//              // settings load
 //              isPornBlockerEnabled         = prefs.getBoolean("adult_block", true)
 //              isReelsBlocked               = prefs.getBoolean("reels_block", true)
 //              isYtShortsBlocked            = prefs.getBoolean("yt_shorts_block", true)
@@ -850,8 +952,11 @@ private fun defaultBlockUiInfo() = BlockUiInfo(
 //              isWhatsappChannelsBlocked    = prefs.getBoolean("wa_channels", false)
 //              isUnsupportedBrowsersBlocked = prefs.getBoolean("unsupported_browser", true)
 //
-//              adultKeywords  = loadKeywordList()   // List<String> regex patterns
+//              adultKeywords  = loadKeywordList()
 //              whitelistWords = loadWhitelistList()
+//
+//              // BUG-05 FIX: redirectUrl overlay থেকে inject করা হয়েছে
+//              onRedirectUrl = { overlay.redirectUrl }
 //
 //              onBlockTriggered = { event -> overlay.show(event) }
 //          }
@@ -866,6 +971,6 @@ private fun defaultBlockUiInfo() = BlockUiInfo(
 //      override fun onDestroy() {
 //          super.onDestroy()
 //          overlay.destroy()
+//          detector.destroy()   // BUG-10 FIX: regexCache clear করা হয়
 //      }
 //  }
-
