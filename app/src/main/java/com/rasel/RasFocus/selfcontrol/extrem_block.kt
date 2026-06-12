@@ -993,3 +993,83 @@ private fun defaultBlockUiInfo() = BlockUiInfo(
 //          detector.destroy()   // BUG-10 FIX: regexCache clear করা হয়
 //      }
 //  }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Extreme Block — Settings / Info Screen (nav destination: "extreme_block")
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+fun ExtremeBlockSettingsScreen() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0D0D0D))
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        // Header icon
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .background(Color(0xFF7B0000), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Shield,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(40.dp),
+            )
+        }
+
+        Text(
+            text = "Extreme Block",
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            textAlign = TextAlign.Center,
+        )
+
+        Text(
+            text = "Extreme Block uses Accessibility Service to intercept blocked apps instantly — even when you try to open them from notifications or recents.",
+            fontSize = 14.sp,
+            color = Color(0xFFAAAAAA),
+            textAlign = TextAlign.Center,
+            lineHeight = 22.sp,
+        )
+
+        HorizontalDivider(color = Color(0xFF2A2A2A))
+
+        // Feature rows
+        ExtremeFeatureRow(Icons.Default.Block,      "App blocking",         "Blocks apps the moment they come to foreground")
+        ExtremeFeatureRow(Icons.Default.VisibilityOff, "Adult content",      "Intercepts known adult site URLs via Accessibility text scan")
+        ExtremeFeatureRow(Icons.Default.Lock,       "Uninstall protection",  "Device Admin + Accessibility guard prevents removal")
+        ExtremeFeatureRow(Icons.Default.Shield,     "Overlay protection",    "Full-screen overlay cannot be dismissed without PIN")
+    }
+}
+
+@Composable
+private fun ExtremeFeatureRow(icon: ImageVector, title: String, subtitle: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF1A1A1A), RoundedCornerShape(14.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .background(Color(0xFF7B0000).copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(imageVector = icon, contentDescription = null, tint = Color(0xFFFF5252), modifier = Modifier.size(24.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+            Text(subtitle, fontSize = 12.sp, color = Color(0xFF888888), lineHeight = 18.sp)
+        }
+    }
+}
