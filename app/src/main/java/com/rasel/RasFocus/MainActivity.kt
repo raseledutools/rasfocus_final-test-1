@@ -750,7 +750,7 @@ fun RasFocusApp(viewModel: MainViewModel) {
         composable("reels_shorts") { com.rasel.RasFocus.selfcontrol.ReelsShortsScreen(navController = navController) }
         composable("adult_block") { com.rasel.RasFocus.selfcontrol.Adult_block() }
         composable("deep_study") { com.rasel.RasFocus.selfcontrol.Deep_study() }
-        composable("extreme_block") { com.rasel.RasFocus.selfcontrol.SettingsScreen() }
+        composable("extreme_block") { com.rasel.RasFocus.selfcontrol.ExtremeBlockSettingsScreen() }
         composable("single_apps") { com.rasel.RasFocus.selfcontrol.BlockerRoot() }
 
         composable(Routes.PARENTAL_DASH) {
