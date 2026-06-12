@@ -45,6 +45,20 @@ package com.rasel.RasFocus.selfcontrol
 //
 //  BUG-11 │ CountdownSeconds যদি 0 হয় তাহলে divide-by-zero সম্ভব।
 //          │ → coerceAtLeast(1) guard যোগ করা হয়েছে।
+//
+//  BUG-12 │ `LifecycleObserver` ও `DefaultLifecycleObserver` import মিসিং ছিল।
+//          │ Compiler "Unresolved reference" দিচ্ছিল (line 501, 504, 505, 510)।
+//          │ → দুটো import যোগ করা হয়েছে।
+//
+//  BUG-13 │ `observers.toList().filterIsInstance<DefaultLifecycleObserver>()
+//          │  .forEach { obs -> ... }` — Kotlin compiler "Overload resolution
+//          │  ambiguity" দিচ্ছিল কারণ LifecycleObserver type resolve হচ্ছিল না।
+//          │ BUG-12 fix হলে এটিও ঠিক হয়। তবে extra safety এর জন্য
+//          │ explicit lambda parameter type যোগ করা হয়েছে।
+//
+//  BUG-14 │ `BlockerPrefs` class সম্পূর্ণ missing ছিল — UnifiedBlockerService
+//          │ ও MyDeviceAdminReceiver import করে কিন্তু class কোথাও ছিল না।
+//          │ → আলাদা BlockerPrefs.kt file তৈরি করা হয়েছে।
 // ─────────────────────────────────────────────────────────────────────────────
 
 import android.accessibilityservice.AccessibilityService
@@ -89,7 +103,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.DefaultLifecycleObserver   // BUG-12 FIX: missing import
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleObserver           // BUG-12 FIX: missing import
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -507,7 +523,10 @@ class ComposeLifecycleOwner : SavedStateRegistryOwner, ViewModelStoreOwner {
 
         fun moveToState(newState: State) {
             state = newState
-            observers.toList().filterIsInstance<DefaultLifecycleObserver>().forEach { obs ->
+            // BUG-13 FIX: explicit type `obs: DefaultLifecycleObserver` যোগ করা হয়েছে
+            // যাতে Kotlin compiler forEach overload ambiguity না করে।
+            observers.toList().filterIsInstance<DefaultLifecycleObserver>()
+                .forEach { obs: DefaultLifecycleObserver ->
                 when (newState) {
                     State.CREATED  -> obs.onCreate(this@ComposeLifecycleOwner)
                     State.STARTED  -> obs.onStart(this@ComposeLifecycleOwner)
