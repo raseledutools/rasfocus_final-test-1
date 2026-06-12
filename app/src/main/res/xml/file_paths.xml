@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path
+        name="shared_pdfs"
+        path="shared_pdfs/" />
+    <cache-path
+        name="captures"
+        path="captures/" />
+    <external-files-path
+        name="external_files"
+        path="Documents/" />
+    <files-path
+        name="internal_files"
+        path="." />
+</paths>
